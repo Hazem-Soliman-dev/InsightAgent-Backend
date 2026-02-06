@@ -1,0 +1,64 @@
+import {
+  Controller,
+  Post,
+  Delete,
+  Param,
+  Body,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { UploadService } from './upload.service';
+
+@Controller('upload')
+export class UploadController {
+  constructor(private readonly uploadService: UploadService) {}
+
+  @Post()
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB max file size
+      },
+    }),
+  )
+  async uploadFile(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('projectId') projectId: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    if (!projectId) {
+      throw new BadRequestException('projectId is required');
+    }
+
+    // Validate file is CSV by extension
+    const originalName = file.originalname.toLowerCase();
+    if (!originalName.endsWith('.csv')) {
+      throw new BadRequestException('Only CSV files are allowed');
+    }
+
+    const result = await this.uploadService.processCSV(projectId, file);
+
+    return {
+      success: true,
+      message: `Successfully uploaded ${result.originalName}`,
+      data: result,
+    };
+  }
+
+  @Delete(':projectId/:tableName')
+  async deleteTable(
+    @Param('projectId') projectId: string,
+    @Param('tableName') tableName: string,
+  ) {
+    await this.uploadService.deleteTable(projectId, tableName);
+    return {
+      success: true,
+      message: `Successfully deleted table ${tableName}`,
+    };
+  }
+}

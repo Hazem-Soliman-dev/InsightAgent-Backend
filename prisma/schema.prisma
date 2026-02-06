@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Direct connection for migrations (without pooling)
+}
+
+model Project {
+  id        String          @id @default(uuid())
+  name      String
+  tables    TableMetadata[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model TableMetadata {
+  id           String   @id @default(uuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tableName    String   // e.g., "proj_abc123_customers"
+  originalName String   // e.g., "customers.csv"
+  columns      String[] // Column names
+  createdAt    DateTime @default(now())
+
+  @@index([projectId])
+}
