@@ -6,6 +6,10 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ProjectsModule } from './projects/projects.module';
 import { UploadModule } from './upload/upload.module';
 import { AgentModule } from './agent/agent.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { SubscriptionModule } from './subscription/subscription.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -13,6 +17,10 @@ import { AgentModule } from './agent/agent.module';
       isGlobal: true,
     }),
     PrismaModule,
+    HealthModule,
+    AuthModule,
+    UsersModule,
+    SubscriptionModule,
     ProjectsModule,
     UploadModule,
     AgentModule,
@@ -31,7 +39,10 @@ import { AgentModule } from './agent/agent.module';
           });
           return { store };
         } catch (error) {
-          console.error('Redis connection failed, using memory cache:', error.message);
+          console.error(
+            'Redis connection failed, using memory cache:',
+            error instanceof Error ? error.message : 'Unknown error',
+          );
           return { store: 'memory' };
         }
       },

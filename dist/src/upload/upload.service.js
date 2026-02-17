@@ -14,18 +14,23 @@ exports.UploadService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const projects_service_1 = require("../projects/projects.service");
+const subscription_service_1 = require("../subscription/subscription.service");
 const sync_1 = require("csv-parse/sync");
 let UploadService = UploadService_1 = class UploadService {
     prisma;
     projectsService;
+    subscriptionService;
     logger = new common_1.Logger(UploadService_1.name);
-    constructor(prisma, projectsService) {
+    constructor(prisma, projectsService, subscriptionService) {
         this.prisma = prisma;
         this.projectsService = projectsService;
+        this.subscriptionService = subscriptionService;
     }
     sanitizeFilename(filename) {
         const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-        const sanitized = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+        const sanitized = nameWithoutExt
+            .replace(/[^a-zA-Z0-9]/g, '_')
+            .toLowerCase();
         return sanitized.match(/^[0-9]/) ? `t_${sanitized}` : sanitized;
     }
     sanitizeColumnName(columnName) {
@@ -40,11 +45,13 @@ let UploadService = UploadService_1 = class UploadService {
         const shortProjectId = projectId.replace(/-/g, '').substring(0, 8);
         return `proj_${shortProjectId}_${sanitizedFilename}`;
     }
-    async processCSV(projectId, file) {
-        await this.projectsService.findOne(projectId);
+    async processCSV(projectId, file, userId) {
+        await this.projectsService.findOne(projectId, userId);
         if (!file || !file.buffer) {
             throw new common_1.BadRequestException('No file provided');
         }
+        const fileSizeMB = file.size / (1024 * 1024);
+        await this.subscriptionService.checkFileSizeLimit(userId, fileSizeMB);
         const originalName = file.originalname;
         const tableName = this.generateTableName(projectId, originalName);
         let records;
@@ -56,7 +63,7 @@ let UploadService = UploadService_1 = class UploadService {
             });
         }
         catch (error) {
-            throw new common_1.BadRequestException(`Failed to parse CSV: ${error.message}`);
+            throw new common_1.BadRequestException(`Failed to parse CSV: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
         if (records.length === 0) {
             throw new common_1.BadRequestException('CSV file is empty or has no data rows');
@@ -74,7 +81,7 @@ let UploadService = UploadService_1 = class UploadService {
             await this.prisma.$executeRawUnsafe(createTableSQL);
         }
         catch (error) {
-            throw new common_1.BadRequestException(`Failed to create table: ${error.message}`);
+            throw new common_1.BadRequestException(`Failed to create table: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
         const batchSize = 100;
         for (let i = 0; i < records.length; i += batchSize) {
@@ -94,7 +101,7 @@ let UploadService = UploadService_1 = class UploadService {
             }
             catch (error) {
                 await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${tableName}"`);
-                throw new common_1.BadRequestException(`Failed to insert data: ${error.message}`);
+                throw new common_1.BadRequestException(`Failed to insert data: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
         }
         await this.prisma.tableMetadata.create({
@@ -125,7 +132,8 @@ let UploadService = UploadService_1 = class UploadService {
         });
         return tables;
     }
-    async deleteTable(projectId, tableName) {
+    async deleteTable(projectId, tableName, userId) {
+        await this.projectsService.findOne(projectId, userId);
         const table = await this.prisma.tableMetadata.findFirst({
             where: { projectId, tableName },
         });
@@ -160,7 +168,7 @@ let UploadService = UploadService_1 = class UploadService {
                     this.logger.log(`Created index on ${tableName}.${col}`);
                 }
                 catch (e) {
-                    this.logger.warn(`Failed to index ${col}: ${e.message}`);
+                    this.logger.warn(`Failed to index ${col}: ${e instanceof Error ? e.message : 'Unknown error'}`);
                 }
             }
         }
@@ -170,6 +178,7 @@ exports.UploadService = UploadService;
 exports.UploadService = UploadService = UploadService_1 = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        projects_service_1.ProjectsService])
+        projects_service_1.ProjectsService,
+        subscription_service_1.SubscriptionService])
 ], UploadService);
 //# sourceMappingURL=upload.service.js.map

@@ -40,7 +40,7 @@ async function bootstrap() {
                 callback(null, true);
                 return;
             }
-            if (!isProduction && origin?.includes('localhost')) {
+            if (!isProduction && origin && origin.includes('localhost')) {
                 callback(null, true);
                 return;
             }
@@ -63,5 +63,5 @@ async function bootstrap() {
     logger.log(`🔒 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     logger.log(`🌐 Allowed Origins: ${allowedOrigins.join(', ') || 'localhost (dev mode)'}`);
 }
-bootstrap();
+void bootstrap();
 //# sourceMappingURL=main.js.map

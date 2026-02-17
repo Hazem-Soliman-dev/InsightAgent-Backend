@@ -15,6 +15,10 @@ const prisma_module_1 = require("./prisma/prisma.module");
 const projects_module_1 = require("./projects/projects.module");
 const upload_module_1 = require("./upload/upload.module");
 const agent_module_1 = require("./agent/agent.module");
+const auth_module_1 = require("./auth/auth.module");
+const users_module_1 = require("./users/users.module");
+const subscription_module_1 = require("./subscription/subscription.module");
+const health_module_1 = require("./health/health.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -25,6 +29,10 @@ exports.AppModule = AppModule = __decorate([
                 isGlobal: true,
             }),
             prisma_module_1.PrismaModule,
+            health_module_1.HealthModule,
+            auth_module_1.AuthModule,
+            users_module_1.UsersModule,
+            subscription_module_1.SubscriptionModule,
             projects_module_1.ProjectsModule,
             upload_module_1.UploadModule,
             agent_module_1.AgentModule,
@@ -44,7 +52,7 @@ exports.AppModule = AppModule = __decorate([
                         return { store };
                     }
                     catch (error) {
-                        console.error('Redis connection failed, using memory cache:', error.message);
+                        console.error('Redis connection failed, using memory cache:', error instanceof Error ? error.message : 'Unknown error');
                         return { store: 'memory' };
                     }
                 },

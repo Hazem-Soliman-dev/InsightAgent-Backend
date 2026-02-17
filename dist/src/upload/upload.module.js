@@ -11,12 +11,14 @@ const common_1 = require("@nestjs/common");
 const upload_service_1 = require("./upload.service");
 const upload_controller_1 = require("./upload.controller");
 const projects_module_1 = require("../projects/projects.module");
+const subscription_module_1 = require("../subscription/subscription.module");
+const prisma_module_1 = require("../prisma/prisma.module");
 let UploadModule = class UploadModule {
 };
 exports.UploadModule = UploadModule;
 exports.UploadModule = UploadModule = __decorate([
     (0, common_1.Module)({
-        imports: [projects_module_1.ProjectsModule],
+        imports: [prisma_module_1.PrismaModule, projects_module_1.ProjectsModule, subscription_module_1.SubscriptionModule],
         controllers: [upload_controller_1.UploadController],
         providers: [upload_service_1.UploadService],
         exports: [upload_service_1.UploadService],

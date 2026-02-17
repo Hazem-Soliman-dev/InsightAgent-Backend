@@ -12,24 +12,31 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProjectsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
+const subscription_service_1 = require("../subscription/subscription.service");
 let ProjectsService = class ProjectsService {
     prisma;
-    constructor(prisma) {
+    subscriptionService;
+    constructor(prisma, subscriptionService) {
         this.prisma = prisma;
+        this.subscriptionService = subscriptionService;
     }
-    async create(createProjectDto) {
+    async create(createProjectDto, userId) {
+        await this.subscriptionService.checkProjectLimit(userId);
         return this.prisma.project.create({
-            data: createProjectDto,
-            include: { tables: true },
+            data: {
+                ...createProjectDto,
+                userId,
+            },
         });
     }
-    async findAll() {
+    async findAll(userId) {
         return this.prisma.project.findMany({
+            where: { userId },
             include: { tables: true },
             orderBy: { createdAt: 'desc' },
         });
     }
-    async findOne(id) {
+    async findOne(id, userId) {
         const project = await this.prisma.project.findUnique({
             where: { id },
             include: { tables: true },
@@ -37,18 +44,21 @@ let ProjectsService = class ProjectsService {
         if (!project) {
             throw new common_1.NotFoundException(`Project with ID ${id} not found`);
         }
+        if (project.userId !== userId) {
+            throw new common_1.ForbiddenException('You do not have access to this project');
+        }
         return project;
     }
-    async update(id, updateProjectDto) {
-        await this.findOne(id);
+    async update(id, updateProjectDto, userId) {
+        await this.findOne(id, userId);
         return this.prisma.project.update({
             where: { id },
             data: updateProjectDto,
             include: { tables: true },
         });
     }
-    async remove(id) {
-        const project = await this.findOne(id);
+    async remove(id, userId) {
+        const project = await this.findOne(id, userId);
         for (const table of project.tables) {
             try {
                 await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${table.tableName}" CASCADE`);
@@ -61,14 +71,15 @@ let ProjectsService = class ProjectsService {
             where: { id },
         });
     }
-    async getProjectTables(projectId) {
-        const project = await this.findOne(projectId);
+    async getProjectTables(projectId, userId) {
+        const project = await this.findOne(projectId, userId);
         return project.tables;
     }
 };
 exports.ProjectsService = ProjectsService;
 exports.ProjectsService = ProjectsService = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [prisma_service_1.PrismaService])
+    __metadata("design:paramtypes", [prisma_service_1.PrismaService,
+        subscription_service_1.SubscriptionService])
 ], ProjectsService);
 //# sourceMappingURL=projects.service.js.map

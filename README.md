@@ -9,6 +9,9 @@ AI-powered NestJS API that transforms CSV files into queryable databases with na
 ## ✨ Features
 
 - 🤖 **AI-Powered Queries** - Natural language to SQL using Groq/Llama
+- 🔐 **Authentication** - JWT-based auth with Role-Based Access Control (RBAC)
+- 💳 **Subscription System** - Tiered usage limits with runtime configuration
+- 👑 **Admin Dashboard** - User management, system analytics, and plan editing
 - 📁 **Dynamic Tables** - Upload CSV, instantly create queryable tables
 - 🔗 **Smart JOINs** - Auto-detect table relationships
 - ⚡ **Redis Caching** - Fast response times
@@ -54,6 +57,8 @@ NODE_ENV=production
 | POST | `/api/projects` | Create project |
 | GET | `/api/projects` | List projects |
 | POST | `/api/upload` | Upload CSV |
+| GET | `/api/subscription/plans` | Fetch all plans |
+| PUT | `/api/subscription/plans/:tier` | Update plan limits (Admin) |
 | POST | `/api/agent/query` | AI query |
 
 ## 🛠️ Tech Stack

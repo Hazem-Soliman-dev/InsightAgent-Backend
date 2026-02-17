@@ -1,9 +1,15 @@
-import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  Inject,
+} from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
+import { SubscriptionService } from '../subscription/subscription.service';
 import Groq from 'groq-sdk';
 
 export interface ChartSuggestion {
@@ -37,6 +43,7 @@ export class AgentService {
   constructor(
     private prisma: PrismaService,
     private uploadService: UploadService,
+    private subscriptionService: SubscriptionService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {
     this.groq = new Groq({
@@ -71,16 +78,30 @@ export class AgentService {
    */
   private detectChartRequest(question: string): ChartSuggestion['type'] | null {
     const lower = question.toLowerCase();
-    
-    if (lower.includes('bar chart') || lower.includes('bar graph')) return 'bar';
-    if (lower.includes('pie chart') || lower.includes('pie graph')) return 'pie';
-    if (lower.includes('line chart') || lower.includes('line graph') || lower.includes('trend')) return 'line';
-    if (lower.includes('area chart') || lower.includes('area graph')) return 'area';
-    if (lower.includes('scatter') || lower.includes('scatter plot')) return 'scatter';
-    if (lower.includes('chart') || lower.includes('graph') || lower.includes('visualize') || lower.includes('plot')) {
+
+    if (lower.includes('bar chart') || lower.includes('bar graph'))
+      return 'bar';
+    if (lower.includes('pie chart') || lower.includes('pie graph'))
+      return 'pie';
+    if (
+      lower.includes('line chart') ||
+      lower.includes('line graph') ||
+      lower.includes('trend')
+    )
+      return 'line';
+    if (lower.includes('area chart') || lower.includes('area graph'))
+      return 'area';
+    if (lower.includes('scatter') || lower.includes('scatter plot'))
+      return 'scatter';
+    if (
+      lower.includes('chart') ||
+      lower.includes('graph') ||
+      lower.includes('visualize') ||
+      lower.includes('plot')
+    ) {
       return 'bar'; // Default chart type
     }
-    
+
     return null;
   }
 
@@ -152,12 +173,10 @@ Return ONLY the raw SQL query, nothing else.`;
     } catch (error) {
       this.logger.error('Failed to generate SQL:', error);
       throw new BadRequestException(
-        `Failed to generate SQL query: ${error.message}`,
+        `Failed to generate SQL query: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
-
-
 
   /**
    * Attempt to fix invalid SQL based on error message
@@ -168,7 +187,7 @@ Return ONLY the raw SQL query, nothing else.`;
     errorMessage: string,
   ): Promise<string> {
     this.logger.warn(`Attempting to fix SQL. Error: ${errorMessage}`);
-    
+
     const systemPrompt = `You are an expert SQL debugger. The user's query failed.
 FIX the SQL based on the error message.
 
@@ -191,7 +210,10 @@ RULES:
       const sql = completion.choices[0]?.message?.content?.trim();
       if (!sql) throw new Error('Failed to fix SQL');
 
-      return sql.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
+      return sql
+        .replace(/```sql\n?/gi, '')
+        .replace(/```\n?/g, '')
+        .trim();
     } catch (e) {
       this.logger.error('Failed to auto-fix SQL', e);
       throw new Error('Could not fix SQL query automatically');
@@ -207,7 +229,10 @@ RULES:
     data: Record<string, unknown>[],
     sql: string,
   ): Promise<{ recommendations: Recommendation[]; summary: string }> {
-    const dataPreview = data.slice(0, 5).map(row => JSON.stringify(row)).join('\n');
+    const dataPreview = data
+      .slice(0, 5)
+      .map((row) => JSON.stringify(row))
+      .join('\n');
     const columns = data.length > 0 ? Object.keys(data[0]) : [];
 
     const systemPrompt = `You are a business intelligence analyst. Based on a user's question, the data schema, query results, and executed SQL, provide:
@@ -248,14 +273,17 @@ Recommendation types:
         model: 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Original question: ${question}\n\nProvide analysis summary and recommendations.` },
+          {
+            role: 'user',
+            content: `Original question: ${question}\n\nProvide analysis summary and recommendations.`,
+          },
         ],
         temperature: 0.3,
         max_tokens: 1024,
       });
 
       const response = completion.choices[0]?.message?.content?.trim();
-      
+
       if (!response) {
         return {
           summary: `Found ${data.length} results.`,
@@ -264,12 +292,17 @@ Recommendation types:
       }
 
       // Parse JSON response
+      interface RecommendationsResponse {
+        summary: string;
+        recommendations: Recommendation[];
+      }
+
       const parsed = JSON.parse(
         response
           .replace(/```json\n?/gi, '')
           .replace(/```\n?/g, '')
-          .trim()
-      );
+          .trim(),
+      ) as RecommendationsResponse;
 
       return {
         summary: parsed.summary || `Found ${data.length} results.`,
@@ -305,7 +338,10 @@ Recommendation types:
 
     columns.forEach((col) => {
       const value = data[0][col];
-      if (typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)) && value !== '')) {
+      if (
+        typeof value === 'number' ||
+        (typeof value === 'string' && !isNaN(Number(value)) && value !== '')
+      ) {
         numericColumns.push(col);
       } else {
         categoryColumns.push(col);
@@ -337,7 +373,7 @@ Recommendation types:
     if (requestedType && requestedType !== 'table') {
       const xAxis = categoryColumns[0] || dateColumns[0] || columns[0];
       const yAxis = numericColumns[0] || columns[1];
-      
+
       return {
         type: requestedType,
         xAxis,
@@ -348,10 +384,12 @@ Recommendation types:
 
     // Auto-detect best chart type
     if (hasAggregation && hasGroupBy && columns.length >= 2) {
-      const yAxis = numericColumns[0] || columns.find((col) => {
-        const value = data[0][col];
-        return typeof value === 'number' || !isNaN(Number(value));
-      });
+      const yAxis =
+        numericColumns[0] ||
+        columns.find((col) => {
+          const value = data[0][col];
+          return typeof value === 'number' || !isNaN(Number(value));
+        });
       const xAxis = categoryColumns[0] || columns.find((col) => col !== yAxis);
 
       if (dateColumns.length > 0) {
@@ -386,7 +424,11 @@ Recommendation types:
         type: 'line',
         xAxis: dateColumns[0],
         yAxis: numericColumns[0],
-        title: this.generateChartTitle('line', dateColumns[0], numericColumns[0]),
+        title: this.generateChartTitle(
+          'line',
+          dateColumns[0],
+          numericColumns[0],
+        ),
       };
     }
 
@@ -396,12 +438,16 @@ Recommendation types:
   /**
    * Generate a descriptive chart title
    */
-  private generateChartTitle(type: string, xAxis?: string, yAxis?: string): string {
+  private generateChartTitle(
+    type: string,
+    xAxis?: string,
+    yAxis?: string,
+  ): string {
     if (!xAxis || !yAxis) return '';
-    
+
     const cleanX = xAxis.replace(/_/g, ' ').replace(/"/g, '');
     const cleanY = yAxis.replace(/_/g, ' ').replace(/"/g, '');
-    
+
     switch (type) {
       case 'bar':
         return `${cleanY} by ${cleanX}`;
@@ -421,15 +467,27 @@ Recommendation types:
   /**
    * Execute a natural language query on project data
    */
-  async executeQuery(projectId: string, question: string): Promise<QueryResult> {
+  async executeQuery(
+    projectId: string,
+    question: string,
+    userId: string,
+  ): Promise<QueryResult> {
     const startTime = Date.now();
+
+    // Check query limit before executing
+    await this.subscriptionService.checkQueryLimit(userId);
 
     // Check cache
     const cacheKey = `proj:${projectId}:q:${crypto.createHash('md5').update(question).digest('hex')}`;
-    const cachedResult = await this.cacheManager.get<QueryResult>(cacheKey);
-    
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+    const cachedResult = (await this.cacheManager.get<QueryResult>(
+      cacheKey,
+    )) as QueryResult | undefined;
+
     if (cachedResult) {
       this.logger.log(`Cache hit for question: ${question}`);
+      // Still increment usage even for cached queries
+      await this.subscriptionService.incrementQueryCount(userId);
       return cachedResult;
     }
 
@@ -475,22 +533,28 @@ Recommendation types:
       } catch (error) {
         attempts++;
         if (attempts > maxRetries) {
-          this.logger.error(`SQL execution failed after retries: ${error.message}`);
+          const errorMsg =
+            error instanceof Error ? error.message : 'Unknown error';
+          this.logger.error(`SQL execution failed after retries: ${errorMsg}`);
           throw new BadRequestException(
-            `Failed to execute query: ${error.message}. SQL: ${currentSQL}`,
+            `Failed to execute query: ${errorMsg}. SQL: ${currentSQL}`,
           );
         }
 
-        this.logger.warn(`SQL execution failed (Attempt ${attempts}): ${error.message}`);
-        
+        const errorMsg =
+          error instanceof Error ? error.message : 'Unknown error';
+        this.logger.warn(
+          `SQL execution failed (Attempt ${attempts}): ${errorMsg}`,
+        );
+
         try {
           // Attempt to fix the SQL
-          currentSQL = await this.fixSQL(question, currentSQL, error.message);
+          currentSQL = await this.fixSQL(question, currentSQL, errorMsg);
           this.logger.log(`Retrying with corrected SQL: ${currentSQL}`);
-        } catch (fixError) {
+        } catch {
           // If fixing fails, throw original error
           throw new BadRequestException(
-            `Failed to execute query: ${error.message}. SQL: ${currentSQL}`,
+            `Failed to execute query: ${errorMsg}. SQL: ${currentSQL}`,
           );
         }
       }
@@ -519,7 +583,11 @@ Recommendation types:
       executionTime,
     };
 
+    // Increment query usage
+    await this.subscriptionService.incrementQueryCount(userId);
+
     // Cache the result (1 hour TTL)
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     await this.cacheManager.set(cacheKey, result, 3600 * 1000);
 
     return result;

@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
+import { SubscriptionService } from '../subscription/subscription.service';
 import { parse } from 'csv-parse/sync';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class UploadService {
   constructor(
     private prisma: PrismaService,
     private projectsService: ProjectsService,
+    private subscriptionService: SubscriptionService,
   ) {}
 
   /**
@@ -19,7 +21,9 @@ export class UploadService {
     // Remove extension
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
     // Replace non-alphanumeric characters with underscores
-    const sanitized = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    const sanitized = nameWithoutExt
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .toLowerCase();
     // Ensure it doesn't start with a number
     return sanitized.match(/^[0-9]/) ? `t_${sanitized}` : sanitized;
   }
@@ -51,18 +55,23 @@ export class UploadService {
   async processCSV(
     projectId: string,
     file: Express.Multer.File,
+    userId: string,
   ): Promise<{
     tableName: string;
     originalName: string;
     columns: string[];
     rowCount: number;
   }> {
-    // Verify project exists
-    await this.projectsService.findOne(projectId);
+    // Verify project exists and user owns it
+    await this.projectsService.findOne(projectId, userId);
 
     if (!file || !file.buffer) {
       throw new BadRequestException('No file provided');
     }
+
+    // Check file size limit
+    const fileSizeMB = file.size / (1024 * 1024);
+    await this.subscriptionService.checkFileSizeLimit(userId, fileSizeMB);
 
     const originalName = file.originalname;
     const tableName = this.generateTableName(projectId, originalName);
@@ -76,7 +85,9 @@ export class UploadService {
         trim: true,
       });
     } catch (error) {
-      throw new BadRequestException(`Failed to parse CSV: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to parse CSV: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
 
     if (records.length === 0) {
@@ -93,7 +104,9 @@ export class UploadService {
       columnMapping.set(raw, columns[idx]);
     });
 
-    this.logger.log(`Creating table ${tableName} with columns: ${columns.join(', ')}`);
+    this.logger.log(
+      `Creating table ${tableName} with columns: ${columns.join(', ')}`,
+    );
 
     // Create table with all TEXT columns
     const columnDefs = columns.map((col) => `"${col}" TEXT`).join(', ');
@@ -102,7 +115,9 @@ export class UploadService {
     try {
       await this.prisma.$executeRawUnsafe(createTableSQL);
     } catch (error) {
-      throw new BadRequestException(`Failed to create table: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to create table: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
     }
 
     // Insert data in batches
@@ -126,8 +141,12 @@ export class UploadService {
         await this.prisma.$executeRawUnsafe(insertSQL);
       } catch (error) {
         // Clean up table on error
-        await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${tableName}"`);
-        throw new BadRequestException(`Failed to insert data: ${error.message}`);
+        await this.prisma.$executeRawUnsafe(
+          `DROP TABLE IF EXISTS "${tableName}"`,
+        );
+        throw new BadRequestException(
+          `Failed to insert data: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
       }
     }
 
@@ -141,7 +160,9 @@ export class UploadService {
       },
     });
 
-    this.logger.log(`Successfully created table ${tableName} with ${records.length} rows`);
+    this.logger.log(
+      `Successfully created table ${tableName} with ${records.length} rows`,
+    );
 
     // Auto-index common columns
     await this.createIndexes(tableName, columns);
@@ -179,8 +200,15 @@ export class UploadService {
   /**
    * Delete a specific table from a project
    */
-  async deleteTable(projectId: string, tableName: string): Promise<void> {
-    // Verify ownership
+  async deleteTable(
+    projectId: string,
+    tableName: string,
+    userId: string,
+  ): Promise<void> {
+    // Verify project ownership
+    await this.projectsService.findOne(projectId, userId);
+
+    // Verify table exists in project
     const table = await this.prisma.tableMetadata.findFirst({
       where: { projectId, tableName },
     });
@@ -192,7 +220,9 @@ export class UploadService {
     }
 
     // Drop the actual table
-    await this.prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${tableName}" CASCADE`);
+    await this.prisma.$executeRawUnsafe(
+      `DROP TABLE IF EXISTS "${tableName}" CASCADE`,
+    );
 
     // Remove metadata
     await this.prisma.tableMetadata.delete({
@@ -203,7 +233,10 @@ export class UploadService {
   /**
    * Automatically create indexes for potentially queriable columns
    */
-  private async createIndexes(tableName: string, columns: string[]): Promise<void> {
+  private async createIndexes(
+    tableName: string,
+    columns: string[],
+  ): Promise<void> {
     for (const col of columns) {
       const lower = col.toLowerCase();
       // Index ID-like columns (foreign keys, primary keys) calls
@@ -215,24 +248,29 @@ export class UploadService {
         lower.includes('date') ||
         lower.includes('time') ||
         lower.includes('created') ||
-        lower.includes('updated') || 
-        lower.includes('email') || 
-        lower.includes('status') || 
+        lower.includes('updated') ||
+        lower.includes('email') ||
+        lower.includes('status') ||
         lower.includes('category') ||
         lower.includes('type')
       ) {
-         try {
-           const indexName = `idx_${tableName}_${col}`;
-           // Limit index name length to 63 chars for Postgres
-           const shortIndexName = indexName.length > 63 
-             ? `idx_${tableName.substring(0, 20)}_${col.substring(0, 20)}_${Date.now().toString().substring(9)}` 
-             : indexName;
+        try {
+          const indexName = `idx_${tableName}_${col}`;
+          // Limit index name length to 63 chars for Postgres
+          const shortIndexName =
+            indexName.length > 63
+              ? `idx_${tableName.substring(0, 20)}_${col.substring(0, 20)}_${Date.now().toString().substring(9)}`
+              : indexName;
 
-           await this.prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "${shortIndexName}" ON "${tableName}" ("${col}")`);
-           this.logger.log(`Created index on ${tableName}.${col}`);
-         } catch(e) {
-           this.logger.warn(`Failed to index ${col}: ${e.message}`);
-         }
+          await this.prisma.$executeRawUnsafe(
+            `CREATE INDEX IF NOT EXISTS "${shortIndexName}" ON "${tableName}" ("${col}")`,
+          );
+          this.logger.log(`Created index on ${tableName}.${col}`);
+        } catch (e) {
+          this.logger.warn(
+            `Failed to index ${col}: ${e instanceof Error ? e.message : 'Unknown error'}`,
+          );
+        }
       }
     }
   }

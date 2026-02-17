@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
-import { AgentService } from './agent.service';
 import { AgentController } from './agent.controller';
+import { AgentService } from './agent.service';
+import { PrismaModule } from '../prisma/prisma.module';
 import { UploadModule } from '../upload/upload.module';
+import { SubscriptionModule } from '../subscription/subscription.module';
 
 @Module({
-  imports: [UploadModule],
+  imports: [PrismaModule, UploadModule, SubscriptionModule],
   controllers: [AgentController],
   providers: [AgentService],
-  exports: [AgentService],
 })
 export class AgentModule {}

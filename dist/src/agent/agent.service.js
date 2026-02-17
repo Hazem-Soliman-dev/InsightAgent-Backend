@@ -55,16 +55,19 @@ const cache_manager_1 = require("@nestjs/cache-manager");
 const crypto = __importStar(require("crypto"));
 const prisma_service_1 = require("../prisma/prisma.service");
 const upload_service_1 = require("../upload/upload.service");
+const subscription_service_1 = require("../subscription/subscription.service");
 const groq_sdk_1 = __importDefault(require("groq-sdk"));
 let AgentService = AgentService_1 = class AgentService {
     prisma;
     uploadService;
+    subscriptionService;
     cacheManager;
     logger = new common_1.Logger(AgentService_1.name);
     groq;
-    constructor(prisma, uploadService, cacheManager) {
+    constructor(prisma, uploadService, subscriptionService, cacheManager) {
         this.prisma = prisma;
         this.uploadService = uploadService;
+        this.subscriptionService = subscriptionService;
         this.cacheManager = cacheManager;
         this.groq = new groq_sdk_1.default({
             apiKey: process.env.GROQ_API_KEY,
@@ -89,13 +92,18 @@ let AgentService = AgentService_1 = class AgentService {
             return 'bar';
         if (lower.includes('pie chart') || lower.includes('pie graph'))
             return 'pie';
-        if (lower.includes('line chart') || lower.includes('line graph') || lower.includes('trend'))
+        if (lower.includes('line chart') ||
+            lower.includes('line graph') ||
+            lower.includes('trend'))
             return 'line';
         if (lower.includes('area chart') || lower.includes('area graph'))
             return 'area';
         if (lower.includes('scatter') || lower.includes('scatter plot'))
             return 'scatter';
-        if (lower.includes('chart') || lower.includes('graph') || lower.includes('visualize') || lower.includes('plot')) {
+        if (lower.includes('chart') ||
+            lower.includes('graph') ||
+            lower.includes('visualize') ||
+            lower.includes('plot')) {
             return 'bar';
         }
         return null;
@@ -156,7 +164,7 @@ Return ONLY the raw SQL query, nothing else.`;
         }
         catch (error) {
             this.logger.error('Failed to generate SQL:', error);
-            throw new common_1.BadRequestException(`Failed to generate SQL query: ${error.message}`);
+            throw new common_1.BadRequestException(`Failed to generate SQL query: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
     async fixSQL(question, invalidSQL, errorMessage) {
@@ -181,7 +189,10 @@ RULES:
             const sql = completion.choices[0]?.message?.content?.trim();
             if (!sql)
                 throw new Error('Failed to fix SQL');
-            return sql.replace(/```sql\n?/gi, '').replace(/```\n?/g, '').trim();
+            return sql
+                .replace(/```sql\n?/gi, '')
+                .replace(/```\n?/g, '')
+                .trim();
         }
         catch (e) {
             this.logger.error('Failed to auto-fix SQL', e);
@@ -189,7 +200,10 @@ RULES:
         }
     }
     async generateRecommendations(question, schemaContext, data, sql) {
-        const dataPreview = data.slice(0, 5).map(row => JSON.stringify(row)).join('\n');
+        const dataPreview = data
+            .slice(0, 5)
+            .map((row) => JSON.stringify(row))
+            .join('\n');
         const columns = data.length > 0 ? Object.keys(data[0]) : [];
         const systemPrompt = `You are a business intelligence analyst. Based on a user's question, the data schema, query results, and executed SQL, provide:
 1. A brief 1-2 sentence summary of the results
@@ -228,7 +242,10 @@ Recommendation types:
                 model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'system', content: systemPrompt },
-                    { role: 'user', content: `Original question: ${question}\n\nProvide analysis summary and recommendations.` },
+                    {
+                        role: 'user',
+                        content: `Original question: ${question}\n\nProvide analysis summary and recommendations.`,
+                    },
                 ],
                 temperature: 0.3,
                 max_tokens: 1024,
@@ -267,7 +284,8 @@ Recommendation types:
         const categoryColumns = [];
         columns.forEach((col) => {
             const value = data[0][col];
-            if (typeof value === 'number' || (typeof value === 'string' && !isNaN(Number(value)) && value !== '')) {
+            if (typeof value === 'number' ||
+                (typeof value === 'string' && !isNaN(Number(value)) && value !== '')) {
                 numericColumns.push(col);
             }
             else {
@@ -297,10 +315,11 @@ Recommendation types:
             };
         }
         if (hasAggregation && hasGroupBy && columns.length >= 2) {
-            const yAxis = numericColumns[0] || columns.find((col) => {
-                const value = data[0][col];
-                return typeof value === 'number' || !isNaN(Number(value));
-            });
+            const yAxis = numericColumns[0] ||
+                columns.find((col) => {
+                    const value = data[0][col];
+                    return typeof value === 'number' || !isNaN(Number(value));
+                });
             const xAxis = categoryColumns[0] || columns.find((col) => col !== yAxis);
             if (dateColumns.length > 0) {
                 return {
@@ -355,12 +374,14 @@ Recommendation types:
                 return `${cleanY} by ${cleanX}`;
         }
     }
-    async executeQuery(projectId, question) {
+    async executeQuery(projectId, question, userId) {
         const startTime = Date.now();
+        await this.subscriptionService.checkQueryLimit(userId);
         const cacheKey = `proj:${projectId}:q:${crypto.createHash('md5').update(question).digest('hex')}`;
-        const cachedResult = await this.cacheManager.get(cacheKey);
+        const cachedResult = (await this.cacheManager.get(cacheKey));
         if (cachedResult) {
             this.logger.log(`Cache hit for question: ${question}`);
+            await this.subscriptionService.incrementQueryCount(userId);
             return cachedResult;
         }
         const schemaContext = await this.buildSchemaContext(projectId);
@@ -390,16 +411,18 @@ Recommendation types:
             catch (error) {
                 attempts++;
                 if (attempts > maxRetries) {
-                    this.logger.error(`SQL execution failed after retries: ${error.message}`);
-                    throw new common_1.BadRequestException(`Failed to execute query: ${error.message}. SQL: ${currentSQL}`);
+                    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                    this.logger.error(`SQL execution failed after retries: ${errorMsg}`);
+                    throw new common_1.BadRequestException(`Failed to execute query: ${errorMsg}. SQL: ${currentSQL}`);
                 }
-                this.logger.warn(`SQL execution failed (Attempt ${attempts}): ${error.message}`);
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                this.logger.warn(`SQL execution failed (Attempt ${attempts}): ${errorMsg}`);
                 try {
-                    currentSQL = await this.fixSQL(question, currentSQL, error.message);
+                    currentSQL = await this.fixSQL(question, currentSQL, errorMsg);
                     this.logger.log(`Retrying with corrected SQL: ${currentSQL}`);
                 }
-                catch (fixError) {
-                    throw new common_1.BadRequestException(`Failed to execute query: ${error.message}. SQL: ${currentSQL}`);
+                catch {
+                    throw new common_1.BadRequestException(`Failed to execute query: ${errorMsg}. SQL: ${currentSQL}`);
                 }
             }
         }
@@ -415,6 +438,7 @@ Recommendation types:
             summary,
             executionTime,
         };
+        await this.subscriptionService.incrementQueryCount(userId);
         await this.cacheManager.set(cacheKey, result, 3600 * 1000);
         return result;
     }
@@ -432,8 +456,9 @@ Recommendation types:
 exports.AgentService = AgentService;
 exports.AgentService = AgentService = AgentService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __param(2, (0, common_1.Inject)(cache_manager_1.CACHE_MANAGER)),
+    __param(3, (0, common_1.Inject)(cache_manager_1.CACHE_MANAGER)),
     __metadata("design:paramtypes", [prisma_service_1.PrismaService,
-        upload_service_1.UploadService, Object])
+        upload_service_1.UploadService,
+        subscription_service_1.SubscriptionService, Object])
 ], AgentService);
 //# sourceMappingURL=agent.service.js.map

@@ -30,13 +30,15 @@ async function bootstrap() {
   app.use(compression());
 
   // Security: CORS with environment-based origins
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((o) =>
-    o.trim(),
-  ) || [];
+  const allowedOrigins =
+    process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || [];
   const isProduction = process.env.NODE_ENV === 'production';
 
   app.enableCors({
-    origin: (origin, callback) => {
+    origin: (
+      origin: string,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
       // Allow requests with no origin (mobile apps, curl, etc.) in development
       if (!origin && !isProduction) {
         callback(null, true);
@@ -53,7 +55,7 @@ async function bootstrap() {
         return;
       }
       // In development, allow localhost
-      if (!isProduction && origin?.includes('localhost')) {
+      if (!isProduction && origin && origin.includes('localhost')) {
         callback(null, true);
         return;
       }
@@ -82,7 +84,8 @@ async function bootstrap() {
 
   logger.log(`🚀 InsightAgent API running on http://localhost:${port}/api`);
   logger.log(`🔒 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
-  logger.log(`🌐 Allowed Origins: ${allowedOrigins.join(', ') || 'localhost (dev mode)'}`);
+  logger.log(
+    `🌐 Allowed Origins: ${allowedOrigins.join(', ') || 'localhost (dev mode)'}`,
+  );
 }
-bootstrap();
-
+void bootstrap();

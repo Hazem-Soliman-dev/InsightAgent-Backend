@@ -1,6 +1,7 @@
 import type { Cache } from 'cache-manager';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
+import { SubscriptionService } from '../subscription/subscription.service';
 export interface ChartSuggestion {
     type: 'table' | 'bar' | 'line' | 'pie' | 'area' | 'scatter';
     xAxis?: string;
@@ -24,10 +25,11 @@ export interface QueryResult {
 export declare class AgentService {
     private prisma;
     private uploadService;
+    private subscriptionService;
     private cacheManager;
     private readonly logger;
     private groq;
-    constructor(prisma: PrismaService, uploadService: UploadService, cacheManager: Cache);
+    constructor(prisma: PrismaService, uploadService: UploadService, subscriptionService: SubscriptionService, cacheManager: Cache);
     private buildSchemaContext;
     private detectChartRequest;
     private generateSQL;
@@ -35,6 +37,6 @@ export declare class AgentService {
     private generateRecommendations;
     private suggestChart;
     private generateChartTitle;
-    executeQuery(projectId: string, question: string): Promise<QueryResult>;
+    executeQuery(projectId: string, question: string, userId: string): Promise<QueryResult>;
     previewTable(projectId: string, tableName: string, limit?: number): Promise<Record<string, unknown>[]>;
 }

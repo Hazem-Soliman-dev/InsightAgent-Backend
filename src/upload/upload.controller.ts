@@ -7,11 +7,16 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/decorators/current-user.decorator';
 
 @Controller('upload')
+@UseGuards(JwtAuthGuard)
 export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
 
@@ -26,6 +31,7 @@ export class UploadController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('projectId') projectId: string,
+    @CurrentUser() user: JwtPayload,
   ) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
@@ -41,7 +47,11 @@ export class UploadController {
       throw new BadRequestException('Only CSV files are allowed');
     }
 
-    const result = await this.uploadService.processCSV(projectId, file);
+    const result = await this.uploadService.processCSV(
+      projectId,
+      file,
+      user.id,
+    );
 
     return {
       success: true,
@@ -54,8 +64,9 @@ export class UploadController {
   async deleteTable(
     @Param('projectId') projectId: string,
     @Param('tableName') tableName: string,
+    @CurrentUser() user: JwtPayload,
   ) {
-    await this.uploadService.deleteTable(projectId, tableName);
+    await this.uploadService.deleteTable(projectId, tableName, user.id);
     return {
       success: true,
       message: `Successfully deleted table ${tableName}`,
