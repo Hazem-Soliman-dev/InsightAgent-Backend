@@ -12,6 +12,8 @@ const app_module_1 = require("./app.module");
 async function bootstrap() {
     const logger = new common_1.Logger('Bootstrap');
     const app = await core_1.NestFactory.create(app_module_1.AppModule, { rawBody: true });
+    app.enableShutdownHooks();
+    app.set('trust proxy', 1);
     app.use((0, helmet_1.default)());
     app.use((0, express_rate_limit_1.default)({
         windowMs: 15 * 60 * 1000,
@@ -22,6 +24,7 @@ async function bootstrap() {
         },
         standardHeaders: true,
         legacyHeaders: false,
+        skip: (req) => req.path === '/api/health' || req.originalUrl === '/api/health',
     }));
     app.use((0, compression_1.default)());
     const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map((o) => o.trim()) || [];
@@ -56,8 +59,10 @@ async function bootstrap() {
         forbidNonWhitelisted: true,
         disableErrorMessages: isProduction,
     }));
-    app.setGlobalPrefix('api');
-    const port = process.env.PORT || 3001;
+    app.setGlobalPrefix('api', {
+        exclude: ['/'],
+    });
+    const port = parseInt(process.env.PORT || '3001', 10);
     await app.listen(port, '0.0.0.0');
     logger.log(`🚀 InsightAgent API running on http://localhost:${port}/api`);
     logger.log(`🔒 Environment: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
